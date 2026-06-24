@@ -15,8 +15,6 @@ import logging
 import random
 import time
 from abc import ABC, abstractmethod
-from math import gcd
-from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +29,8 @@ class LBStrategy(ABC):
     @abstractmethod
     async def select(
         self,
-        backends: List[str],
-        metrics: Optional[Dict[str, Dict]] = None,
+        backends: list[str],
+        metrics: dict[str, dict] | None = None,
         **kwargs,          # session_id, request_key, etc.
     ) -> str:
         """Select and return a target backend URL."""
@@ -67,14 +65,14 @@ class WeightedRoundRobinStrategy(LBStrategy):
     Backends beyond the weights list receive weight 1.
     """
 
-    DEFAULT_WEIGHTS: List[int] = [3, 2, 1]
+    DEFAULT_WEIGHTS: list[int] = [3, 2, 1]
 
-    def __init__(self, weights: Optional[List[int]] = None) -> None:
+    def __init__(self, weights: list[int] | None = None) -> None:
         self._base_weights = weights or self.DEFAULT_WEIGHTS
-        self._current_weights: List[int] = []
+        self._current_weights: list[int] = []
         self._lock = asyncio.Lock()
 
-    def _weights_for(self, n: int) -> List[int]:
+    def _weights_for(self, n: int) -> list[int]:
         """Pad / trim base weights to length n."""
         w = list(self._base_weights[:n])
         while len(w) < n:
@@ -120,7 +118,7 @@ class StickySessionStrategy(LBStrategy):
     SESSION_TTL: int = 300  # seconds
 
     def __init__(self) -> None:
-        self._sessions: Dict[str, tuple] = {}   # session_id → (backend, ts)
+        self._sessions: dict[str, tuple] = {}   # session_id → (backend, ts)
         self._rr_index: int = 0                 # fallback for sessionless requests
         self._lock = asyncio.Lock()
 
@@ -130,7 +128,7 @@ class StickySessionStrategy(LBStrategy):
         return backends[h % len(backends)]
 
     async def select(self, backends, metrics=None, **kwargs) -> str:
-        session_id: Optional[str] = kwargs.get("session_id")
+        session_id: str | None = kwargs.get("session_id")
         now = time.time()
 
         async with self._lock:
@@ -169,12 +167,12 @@ class ConsistentHashingStrategy(LBStrategy):
     VNODES: int = 50
 
     def __init__(self) -> None:
-        self._ring: Dict[int, str] = {}
-        self._sorted_keys: List[int] = []
-        self._last_backends: List[str] = []
+        self._ring: dict[int, str] = {}
+        self._sorted_keys: list[int] = []
+        self._last_backends: list[str] = []
         self._lock = asyncio.Lock()
 
-    def _build_ring(self, backends: List[str]) -> None:
+    def _build_ring(self, backends: list[str]) -> None:
         self._ring = {}
         for backend in backends:
             for i in range(self.VNODES):
@@ -273,7 +271,7 @@ class AdaptiveFeedbackStrategy(LBStrategy):
     """
 
     def __init__(self) -> None:
-        self._weights: Dict[str, float] = {}
+        self._weights: dict[str, float] = {}
         self._lock = asyncio.Lock()
 
     async def select(self, backends, metrics=None, **kwargs) -> str:

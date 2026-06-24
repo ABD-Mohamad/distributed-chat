@@ -1,8 +1,11 @@
 import asyncio
 import json
 import logging
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import UTC, datetime
+
+START_TIME = time.time()
 
 from aiokafka import AIOKafkaConsumer
 from fastapi import FastAPI
@@ -35,7 +38,7 @@ async def consume():
                     "topic": msg.topic,
                     "partition": msg.partition,
                     "offset": msg.offset,
-                    "consumed_at": datetime.now(timezone.utc).isoformat(),
+                    "consumed_at": datetime.now(UTC).isoformat(),
                 }
                 _events.append(record)
                 if len(_events) > MAX_EVENTS:
@@ -56,12 +59,22 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="NexusChat Event Service", lifespan=lifespan)
 
-setup_telemetry("event-service", app=app)
+setup_telemetry(app=app)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "event-service", "version": "1.0.0", "uptime": round(time.time() - START_TIME, 2)}
+
+
+@app.get("/ready")
+async def ready():
+    return {"status": "ok", "service": "event-service"}
+
+
+@app.get("/live")
+async def live():
+    return {"status": "ok", "service": "event-service"}
 
 
 @app.get("/events")

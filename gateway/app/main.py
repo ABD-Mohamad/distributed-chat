@@ -1,53 +1,69 @@
 import asyncio
-import json
 import logging
+import time
 
 import websockets
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Query, Header, Depends
-from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse
-from pydantic import BaseModel
 
-from .auth import decode_token
-from .ratelimit import RateLimiter
+START_TIME = time.time()
+from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.gzip import GZipMiddleware
+from fastapi.responses import HTMLResponse
+from pydantic import BaseModel, Field
+
+from .auth import create_refresh_token, create_token, decode_refresh_token, decode_token
 from .config import settings
-from .telemetry import setup_telemetry
 from .http_client import (
-    register as lb_register,
-    login as lb_login,
     create_chat as lb_create_chat,
-    list_chats as lb_list_chats,
-    join_chat as lb_join_chat,
+)
+from .http_client import (
     get_history as lb_get_history,
 )
+from .http_client import (
+    join_chat as lb_join_chat,
+)
+from .http_client import (
+    list_chats as lb_list_chats,
+)
+from .http_client import (
+    login as lb_login,
+)
+from .http_client import (
+    register as lb_register,
+)
+from .ratelimit import blacklist_token, check_rate_limit, is_blacklisted
+from .telemetry import setup_telemetry
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NexusChat Gateway")
 
-setup_telemetry("gateway", app=app)
+setup_telemetry(app=app)
 
-app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
-
-limiter = RateLimiter()
+app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 
 class RegisterRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 class LoginRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 class CreateChatRequest(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=100)
 
 
 class SendMessageRequest(BaseModel):
-    body: str
+    body: str = Field(..., min_length=1, max_length=1000)
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
 
 
 LB_WS_URL = settings.lb_ws_url
@@ -55,11 +71,23 @@ LB_WS_URL = settings.lb_ws_url
 
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "gateway", "version": "1.0.0", "uptime": round(time.time() - START_TIME, 2)}
+
+
+@app.get("/ready")
+async def ready():
+    return {"status": "ok", "service": "gateway"}
+
+
+@app.get("/live")
+async def live():
+    return {"status": "ok", "service": "gateway"}
 
 
 @app.post("/register")
 async def register(req: RegisterRequest):
+    if not await check_rate_limit(f"register:{req.username}", 5, 60):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     result = await lb_register(req.username, req.password)
     if result is None:
         raise HTTPException(status_code=409, detail="Registration failed")
@@ -68,16 +96,48 @@ async def register(req: RegisterRequest):
 
 @app.post("/login")
 async def login(req: LoginRequest):
+    if not await check_rate_limit(f"login:{req.username}", 10, 60):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
     result = await lb_login(req.username, req.password)
     if result is None:
         raise HTTPException(status_code=401, detail="Login failed")
     return result
 
 
+@app.post("/refresh")
+async def refresh(req: RefreshRequest):
+    if not await check_rate_limit(f"refresh:{req.refresh_token[:16]}", 10, 60):
+        raise HTTPException(status_code=429, detail="Rate limit exceeded")
+    payload = decode_refresh_token(req.refresh_token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired refresh token")
+    user_id = payload["sub"]
+    new_access_token = create_token(user_id)
+    new_refresh_token = create_refresh_token(user_id)
+    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}
+
+
+@app.post("/logout")
+async def logout(authorization: str = Header(...)):
+    token = authorization.replace("Bearer ", "")
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing token")
+    payload = decode_token(token)
+    if payload is None:
+        raise HTTPException(status_code=401, detail="Invalid or expired token")
+    exp = payload.get("exp", 0)
+    import time as _time
+    remaining = max(1, int(exp - _time.time()))
+    await blacklist_token(token, remaining)
+    return {"detail": "Logged out"}
+
+
 @app.post("/chats")
 async def create_chat(req: CreateChatRequest, authorization: str = Header(...)):
     token = authorization.replace("Bearer ", "")
-    if not limiter.allow(token):
+    if await is_blacklisted(token):
+        raise HTTPException(status_code=401, detail="Token is blacklisted")
+    if not await check_rate_limit(f"chats:{token}", 30, 60):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     result = await lb_create_chat(token, req.name)
     if result is None:
@@ -88,7 +148,9 @@ async def create_chat(req: CreateChatRequest, authorization: str = Header(...)):
 @app.get("/chats")
 async def list_chats(authorization: str = Header(...)):
     token = authorization.replace("Bearer ", "")
-    if not limiter.allow(token):
+    if await is_blacklisted(token):
+        raise HTTPException(status_code=401, detail="Token is blacklisted")
+    if not await check_rate_limit(f"chats:{token}", 30, 60):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     result = await lb_list_chats(token)
     if result is None:
@@ -99,7 +161,9 @@ async def list_chats(authorization: str = Header(...)):
 @app.post("/chats/{chat_id}/join")
 async def join_chat(chat_id: str, authorization: str = Header(...)):
     token = authorization.replace("Bearer ", "")
-    if not limiter.allow(token):
+    if await is_blacklisted(token):
+        raise HTTPException(status_code=401, detail="Token is blacklisted")
+    if not await check_rate_limit(f"chats:{token}", 30, 60):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     result = await lb_join_chat(token, chat_id)
     if result is None:
@@ -110,7 +174,9 @@ async def join_chat(chat_id: str, authorization: str = Header(...)):
 @app.get("/chats/{chat_id}/messages")
 async def get_messages(chat_id: str, limit: int = 50, authorization: str = Header(...)):
     token = authorization.replace("Bearer ", "")
-    if not limiter.allow(token):
+    if await is_blacklisted(token):
+        raise HTTPException(status_code=401, detail="Token is blacklisted")
+    if not await check_rate_limit(f"chats:{token}", 30, 60):
         raise HTTPException(status_code=429, detail="Rate limit exceeded")
     result = await lb_get_history(token, chat_id, limit)
     if result is None:
@@ -126,6 +192,9 @@ WS_MAX_RECONNECT = 5
 async def websocket_proxy(websocket: WebSocket, chat_id: str, token: str = Query(...)):
     payload = decode_token(token)
     if payload is None:
+        await websocket.close(code=4001)
+        return
+    if await is_blacklisted(token):
         await websocket.close(code=4001)
         return
     await websocket.accept()
@@ -148,7 +217,7 @@ async def websocket_proxy(websocket: WebSocket, chat_id: str, token: str = Query
                 for t in pending:
                     t.cancel()
                 break
-            except (websockets.ConnectionClosed, OSError) as e:
+            except (websockets.ConnectionClosed, OSError):
                 reconnect_attempts += 1
                 if reconnect_attempts >= WS_MAX_RECONNECT:
                     break

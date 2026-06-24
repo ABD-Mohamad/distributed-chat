@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff==0.9.6
+      - run: ruff check .
+
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install mypy==1.15.0
+      - name: Install service dependencies
+        run: |
+          for req in auth-service/requirements.txt chat-service/requirements.txt \
+                     event-service/requirements.txt gateway/requirements.txt \
+                     load-balancer/requirements.txt; do
+            pip install -r "$req"
+          done
+      - run: mypy --ignore-missing-imports auth-service/app chat-service/app event-service/app gateway/app load-balancer/app
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -f auth-service/Dockerfile -t nexuschat-auth .
+      - run: docker build -f chat-service/Dockerfile -t nexuschat-chat .
+      - run: docker build -f event-service/Dockerfile -t nexuschat-event .
+      - run: docker build -f gateway/Dockerfile -t nexuschat-gateway .
+      - run: docker build -f load-balancer/Dockerfile -t nexuschat-lb .
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Install service dependencies
+        run: |
+          for req in auth-service/requirements.txt chat-service/requirements.txt \
+                     event-service/requirements.txt gateway/requirements.txt \
+                     load-balancer/requirements.txt; do
+            pip install -r "$req"
+          done
+      - run: pip install pytest==8.3.4 pytest-asyncio==0.25.3 httpx==0.28.1
+      - name: Check for tests and run
+        run: |
+          if (Test-Path -Path "tests" -PathType Container) { pytest tests/ } else { Write-Host "No tests/ directory found, skipping" }
+        shell: pwsh

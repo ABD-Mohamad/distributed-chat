@@ -13,7 +13,8 @@ Idempotency rule:
 import asyncio
 import logging
 import random
-from typing import Any, Callable, Tuple
+from collections.abc import Callable
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +48,7 @@ class RetryPolicy:
 
     async def execute(
         self, func: Callable[[], Any]
-    ) -> Tuple[Any, int]:
+    ) -> tuple[Any, int]:
         """
         Execute `func` (a zero-argument async callable) with automatic retries.
 

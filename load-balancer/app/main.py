@@ -3,12 +3,10 @@ import logging
 import os
 import time
 from pathlib import Path
-from typing import Dict
+
+START_TIME = time.time()
 
 import httpx
-from fastapi import FastAPI, Request, Response, WebSocket, WebSocketDisconnect, Query
-from fastapi.responses import FileResponse, JSONResponse
-
 from app.circuit_breaker import CircuitBreaker, CircuitState
 from app.metrics_exporter import (
     PROMETHEUS_CONTENT_TYPE,
@@ -35,14 +33,16 @@ from app.strategies import (
     StickySessionStrategy,
     WeightedRoundRobinStrategy,
 )
-from app.ws_proxy import ws_proxy_handler
 from app.telemetry import setup_telemetry
+from app.ws_proxy import ws_proxy_handler
+from fastapi import FastAPI, Query, Request, Response, WebSocket
+from fastapi.responses import FileResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="NexusChat Load Balancer", version="1.0.0")
 
-setup_telemetry("load-balancer", app=app)
+setup_telemetry(app=app)
 
 _backends_env = os.getenv(
     "BACKENDS",
@@ -56,7 +56,7 @@ WS_BACKENDS: list[str] = [
 logger.info(f"REST backends: {BACKENDS}")
 logger.info(f"WS backends: {WS_BACKENDS}")
 
-_strategies: Dict[str, LBStrategy] = {
+_strategies: dict[str, LBStrategy] = {
     "rr":       RoundRobinStrategy(),
     "wrr":      WeightedRoundRobinStrategy(),
     "sticky":   StickySessionStrategy(),
@@ -69,7 +69,7 @@ _strategies: Dict[str, LBStrategy] = {
     "jiq":      JoinIdleQueueStrategy(),
 }
 
-STRATEGY_DESCRIPTIONS: Dict[str, str] = {
+STRATEGY_DESCRIPTIONS: dict[str, str] = {
     "rr":       "Round-Robin: cyclic distribution",
     "wrr":      "Weighted RR: proportional by capacity (weights 3:2:1)",
     "sticky":   "Sticky Session: session affinity with 5-minute TTL",
@@ -88,7 +88,7 @@ _strategy_lock = asyncio.Lock()
 CB_FAILURE_THRESHOLD: int   = int(os.getenv("CB_FAILURE_THRESHOLD", "3"))
 CB_RECOVERY_TIMEOUT:  float = float(os.getenv("CB_RECOVERY_TIMEOUT", "30"))
 
-_circuit_breakers: Dict[str, CircuitBreaker] = {
+_circuit_breakers: dict[str, CircuitBreaker] = {
     b: CircuitBreaker(
         failure_threshold=CB_FAILURE_THRESHOLD,
         recovery_timeout=CB_RECOVERY_TIMEOUT,
@@ -106,7 +106,7 @@ _retry_policy = RetryPolicy(
 ALPHA = 0.2
 
 
-def _blank_metrics() -> Dict:
+def _blank_metrics() -> dict:
     return {
         "active_connections": 0,
         "avg_latency":        0.0,
@@ -117,7 +117,7 @@ def _blank_metrics() -> Dict:
     }
 
 
-_metrics: Dict[str, Dict] = {b: _blank_metrics() for b in BACKENDS}
+_metrics: dict[str, dict] = {b: _blank_metrics() for b in BACKENDS}
 _metrics_lock = asyncio.Lock()
 
 
@@ -178,12 +178,25 @@ async def health():
     open_count = sum(1 for s in cb_summary.values() if s == "open")
     return {
         "status":               "degraded" if open_count > 0 else "healthy",
+        "service":              "load-balancer",
+        "version":              "1.0.0",
+        "uptime":               round(time.time() - START_TIME, 2),
         "active_strategy":      _strategies[name].__class__.__name__,
         "available_algorithms": list(_strategies.keys()),
         "backends_count":       len(BACKENDS),
         "circuit_breakers":     cb_summary,
         "open_circuits":        open_count,
     }
+
+
+@app.get("/ready", tags=["Management"])
+async def ready():
+    return {"status": "ok", "service": "load-balancer"}
+
+
+@app.get("/live", tags=["Management"])
+async def live():
+    return {"status": "ok", "service": "load-balancer"}
 
 
 @app.get("/strategies", tags=["Management"])

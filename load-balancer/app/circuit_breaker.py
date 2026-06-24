@@ -17,7 +17,6 @@ import asyncio
 import logging
 import time
 from enum import Enum
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
@@ -41,8 +40,8 @@ class CircuitBreaker:
 
         self._state:             CircuitState    = CircuitState.CLOSED
         self._failure_count:     int             = 0
-        self._last_failure_time: Optional[float] = None
-        self._opened_at:         Optional[float] = None
+        self._last_failure_time: float | None = None
+        self._opened_at:         float | None = None
         self._lock               = asyncio.Lock()
 
     # ── Read-only helpers (safe to call without lock in asyncio context) ──────
@@ -69,7 +68,7 @@ class CircuitBreaker:
 
     def info(self) -> dict:
         """Snapshot of current state for API/dashboard consumption."""
-        time_in_state: Optional[float] = None
+        time_in_state: float | None = None
         if self._opened_at is not None:
             time_in_state = round(time.time() - self._opened_at, 1)
 

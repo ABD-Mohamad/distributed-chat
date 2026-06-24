@@ -1,0 +1,12 @@
+* text=auto
+*.py text
+*.yml text
+*.yaml text
+*.json text
+*.md text
+*.sql text
+*.sh text
+*.conf text
+*.proto text
+*.toml text
+*.txt text

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
     grpc_port: int = 50051
 
     redis_url: str = "redis://redis:6379/0"
+    cors_origins: str = "*"
 
     shard0_primary_url: str = "postgresql+asyncpg://nexuschat:nexuschat@shard0-primary:5432/nexuschat"
     shard0_replica_url: str = "postgresql+asyncpg://nexuschat:nexuschat@shard0-replica:5432/nexuschat"

@@ -17,9 +17,16 @@ services:
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: gateway
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
     depends_on:
       load-balancer:
-        condition: service_started
+        condition: service_healthy
 
   load-balancer:
     build:
@@ -30,13 +37,20 @@ services:
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: load-balancer
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
     depends_on:
       chat-service-1:
-        condition: service_started
+        condition: service_healthy
       chat-service-2:
-        condition: service_started
+        condition: service_healthy
       chat-service-3:
-        condition: service_started
+        condition: service_healthy
       jaeger:
         condition: service_started
 
@@ -48,6 +62,13 @@ services:
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: auth-service
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
     depends_on:
       postgres-auth:
         condition: service_healthy
@@ -61,13 +82,20 @@ services:
       GRPC_PORT: "50051"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: chat-service-1
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       shard0-primary:
         condition: service_healthy
       shard1-primary:
@@ -86,13 +114,20 @@ services:
       GRPC_PORT: "50052"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: chat-service-2
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       shard0-primary:
         condition: service_healthy
       shard1-primary:
@@ -111,13 +146,20 @@ services:
       GRPC_PORT: "50053"
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: chat-service-3
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       rabbitmq:
-        condition: service_started
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
       shard0-primary:
         condition: service_healthy
       shard1-primary:
@@ -144,17 +186,35 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
       CLUSTER_ID: "nexuschat-kafka-cluster-01"
+    healthcheck:
+      test: ["CMD-SHELL", "kafka-topics.sh --bootstrap-server localhost:9092 --list"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
 
   rabbitmq:
     image: rabbitmq:4-alpine
     ports:
       - "5672:5672"
       - "15672:15672"
+    healthcheck:
+      test: ["CMD-SHELL", "rabbitmq-diagnostics -q ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
 
   redis:
     image: redis:7-alpine
     ports:
       - "6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
 
   event-service:
     build:
@@ -163,9 +223,16 @@ services:
     environment:
       OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
       OTEL_SERVICE_NAME: event-service
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:8000/health || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    stop_grace_period: 30s
     depends_on:
       kafka:
-        condition: service_started
+        condition: service_healthy
       jaeger:
         condition: service_started
 

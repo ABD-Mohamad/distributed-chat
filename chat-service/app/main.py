@@ -1,30 +1,43 @@
 import asyncio
 import json
 import logging
+import time
 import uuid
 from contextlib import asynccontextmanager
 
+START_TIME = time.time()
+
 import aio_pika
+import chat_pb2_grpc
 import grpc
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Header, Depends, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select, text
 
-import chat_pb2_grpc
 from .config import settings
 from .telemetry import setup_telemetry
 
 logger = logging.getLogger(__name__)
-from .models import Chat, ChatMember, Message
-from .sharding import init_shards, dispose_shards, get_primary_session, get_replica_session
-from .database import auth_async_session
+from datetime import UTC
+
 from .auth import decode_token
-from .ws_manager import manager
+from .cache import (
+    close_cache,
+    get_cached_history,
+    init_cache,
+    invalidate_history_cache,
+    redis_client,
+    set_cached_history,
+)
+from .database import auth_async_session
+from .event_producer import close_kafka, init_kafka, kafka_producer, publish_event
 from .grpc_server import ChatServicer
-from .cache import init_cache, close_cache, get_cached_history, set_cached_history, invalidate_history_cache
-from .event_producer import init_kafka, close_kafka, publish_event
-from .rabbitmq import init_rabbitmq, close_rabbitmq, start_consumer
+from .models import Chat, ChatMember, Message
+from .rabbitmq import _connection as _rmq_connection
+from .rabbitmq import close_rabbitmq, init_rabbitmq, start_consumer
+from .sharding import _shards, dispose_shards, get_primary_session, get_replica_session, init_shards
+from .ws_manager import manager
 
 
 def get_user_id(authorization: str = Header(...)) -> str:
@@ -80,11 +93,11 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="NexusChat Service", lifespan=lifespan)
 
-setup_telemetry("chat-service", app=app)
+setup_telemetry(app=app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -92,8 +105,8 @@ app.add_middleware(
 
 
 class AuthRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 class TokenResponse(BaseModel):
@@ -102,22 +115,54 @@ class TokenResponse(BaseModel):
 
 
 class CreateChatRequest(BaseModel):
-    name: str
+    name: str = Field(..., min_length=1, max_length=100)
 
 
 class SendMessageRequest(BaseModel):
-    body: str
+    body: str = Field(..., min_length=1, max_length=1000)
 
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "server_id": settings.grpc_port}
+    return {"status": "ok", "service": "chat-service", "version": "1.0.0", "server_id": settings.grpc_port, "uptime": round(time.time() - START_TIME, 2)}
+
+
+@app.get("/ready")
+async def ready():
+    from sqlalchemy import text
+    if redis_client:
+        try:
+            await redis_client.ping()
+        except Exception:
+            raise HTTPException(status_code=503, detail="Redis not ready")
+    if not kafka_producer:
+        raise HTTPException(status_code=503, detail="Kafka not ready")
+    if not _rmq_connection or _rmq_connection.is_closed:
+        raise HTTPException(status_code=503, detail="RabbitMQ not ready")
+    for i, shard in enumerate(_shards):
+        try:
+            async with shard.primary_session() as sess:
+                await sess.execute(text("SELECT 1"))
+        except Exception:
+            raise HTTPException(status_code=503, detail=f"Shard {i} not ready")
+    try:
+        async with auth_async_session() as sess:
+            await sess.execute(text("SELECT 1"))
+    except Exception:
+        raise HTTPException(status_code=503, detail="Auth DB not ready")
+    return {"status": "ok", "service": "chat-service"}
+
+
+@app.get("/live")
+async def live():
+    return {"status": "ok", "service": "chat-service"}
 
 
 @app.post("/register", response_model=TokenResponse)
 async def register(req: AuthRequest):
-    from .auth import hash_password, create_token
     import uuid as _uuid
+
+    from .auth import create_token, hash_password
     async with auth_async_session() as db:
         result = await db.execute(text("SELECT id FROM users WHERE username = :un"), {"un": req.username})
         if result.scalar_one_or_none():
@@ -133,7 +178,7 @@ async def register(req: AuthRequest):
 
 @app.post("/login", response_model=TokenResponse)
 async def login(req: AuthRequest):
-    from .auth import verify_password, create_token
+    from .auth import create_token, verify_password
     async with auth_async_session() as db:
         result = await db.execute(text("SELECT id, password_hash FROM users WHERE username = :un"), {"un": req.username})
         row = result.fetchone()
@@ -246,14 +291,14 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: str, token: str = Qu
                 msg_id = str(uuid.uuid4())
                 db.add(Message(id=uuid.UUID(msg_id), chat_id=uuid.UUID(chat_id), sender_id=uuid.UUID(user_id), body=body))
                 await db.commit()
-                from datetime import datetime, timezone
+                from datetime import datetime
                 payload_out = {
                     "id": msg_id,
                     "chat_id": chat_id,
                     "sender_id": user_id,
                     "sender_username": username,
                     "body": body,
-                    "sent_at": datetime.now(timezone.utc).isoformat(),
+                    "sent_at": datetime.now(UTC).isoformat(),
                 }
             await manager.broadcast_with_rmq(chat_id, payload_out)
             asyncio.ensure_future(publish_event("message.sent", payload_out))

@@ -1,5 +1,6 @@
 import json
 import logging
+from datetime import UTC
 
 from aiokafka import AIOKafkaProducer
 
@@ -36,11 +37,11 @@ async def publish_event(event_type: str, payload: dict):
         return
     topic = settings.kafka_topic_messages if event_type == "message.sent" else settings.kafka_topic_events
     try:
-        from datetime import datetime, timezone
+        from datetime import datetime
         record = {
             "event_type": event_type,
             "version": 1,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
             "payload": payload,
         }
         await kafka_producer.send(topic, record)

@@ -1,17 +1,17 @@
-import json
-import uuid
 import asyncio
 import logging
-
-import grpc
-from sqlalchemy import select
+import uuid
+from datetime import UTC
 
 import chat_pb2
 import chat_pb2_grpc
-from .models import Chat, ChatMember, Message
-from .sharding import get_primary_session, get_replica_session, get_all_primary_sessions
-from .ws_manager import manager
+import grpc
+from sqlalchemy import select
+
 from .cache import invalidate_history_cache
+from .models import Chat, ChatMember, Message
+from .sharding import get_all_primary_sessions, get_primary_session, get_replica_session
+from .ws_manager import manager
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +66,9 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
             ))
             await db.commit()
             await invalidate_history_cache(request.chat_id)
-        from datetime import datetime, timezone
         import asyncio
+        from datetime import datetime
+
         from .event_producer import publish_event
         payload = {
             "id": msg_id,
@@ -75,7 +76,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
             "sender_id": request.user_id,
             "sender_username": request.sender_username,
             "body": request.body,
-            "sent_at": datetime.now(timezone.utc).isoformat(),
+            "sent_at": datetime.now(UTC).isoformat(),
         }
         await manager.broadcast_with_rmq(request.chat_id, payload)
         asyncio.ensure_future(publish_event("message.sent", payload))

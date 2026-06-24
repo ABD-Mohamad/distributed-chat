@@ -2,11 +2,11 @@ import logging
 import sys
 
 from opentelemetry import trace
+from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from opentelemetry.sdk.resources import Resource
 from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
 from opentelemetry.sdk.trace.export import BatchSpanProcessor
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
 from pythonjsonlogger import jsonlogger
 
 
@@ -19,7 +19,9 @@ class TraceIdFilter(logging.Filter):
         return True
 
 
-def setup_telemetry(service_name: str, app=None):
+def setup_telemetry(app=None):
+    import os
+    service_name = os.getenv("OTEL_SERVICE_NAME", "unknown")
     resource = Resource.create(attributes={"service.name": service_name})
     provider = TracerProvider(resource=resource)
     exporter = OTLPSpanExporter()

@@ -10,12 +10,12 @@ errors on hot-reload / test runs.
 """
 
 from prometheus_client import (
+    CONTENT_TYPE_LATEST,
     CollectorRegistry,
     Counter,
     Gauge,
     Histogram,
     generate_latest,
-    CONTENT_TYPE_LATEST,
 )
 
 # ── Custom registry (avoids conflicts on hot-reload) ──────────────────────────

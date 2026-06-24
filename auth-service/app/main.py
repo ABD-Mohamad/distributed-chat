@@ -1,16 +1,19 @@
+import time
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, Depends, HTTPException, status
+START_TIME = time.time()
+
+from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from .auth import create_refresh_token, create_token, decode_refresh_token, hash_password, verify_password
 from .config import settings
 from .database import engine, get_db
 from .models import User
-from .auth import hash_password, verify_password, create_token
 from .telemetry import setup_telemetry
 
 
@@ -22,11 +25,11 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title="NexusChat Auth Service", lifespan=lifespan)
 
-setup_telemetry("auth-service", app=app)
+setup_telemetry(app=app)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins.split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -34,8 +37,8 @@ app.add_middleware(
 
 
 class AuthRequest(BaseModel):
-    username: str
-    password: str
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6, max_length=128)
 
 
 class TokenResponse(BaseModel):
@@ -43,9 +46,29 @@ class TokenResponse(BaseModel):
     token_type: str = "bearer"
 
 
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok"}
+    return {"status": "ok", "service": "auth-service", "version": "1.0.0", "uptime": round(time.time() - START_TIME, 2)}
+
+
+@app.get("/ready")
+async def ready():
+    from sqlalchemy import text
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        return {"status": "ok", "service": "auth-service"}
+    except Exception:
+        raise HTTPException(status_code=503, detail="Database not ready")
+
+
+@app.get("/live")
+async def live():
+    return {"status": "ok", "service": "auth-service"}
 
 
 @app.post("/register", response_model=TokenResponse)
@@ -66,3 +89,14 @@ async def login(req: AuthRequest, db: AsyncSession = Depends(get_db)):
     if not user or not verify_password(req.password, user.password_hash):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
     return TokenResponse(access_token=create_token(str(user.id)))
+
+
+@app.post("/refresh")
+async def refresh(req: RefreshRequest):
+    payload = decode_refresh_token(req.refresh_token)
+    if payload is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token")
+    user_id = payload["sub"]
+    new_access_token = create_token(user_id)
+    new_refresh_token = create_refresh_token(user_id)
+    return {"access_token": new_access_token, "refresh_token": new_refresh_token, "token_type": "bearer"}

@@ -1,5 +1,4 @@
-import time
-from collections import defaultdict
+from datetime import UTC, datetime, timedelta
 
 from fastapi import HTTPException, status
 from jose import JWTError, jwt
@@ -10,6 +9,28 @@ from .config import settings
 def decode_token(token: str) -> dict | None:
     try:
         return jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+    except JWTError:
+        return None
+
+
+def create_token(user_id: str) -> str:
+    expire = datetime.now(UTC) + timedelta(minutes=settings.jwt_expire_minutes)
+    payload = {"sub": user_id, "exp": expire}
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def create_refresh_token(user_id: str) -> str:
+    expire = datetime.now(UTC) + timedelta(days=7)
+    payload = {"sub": user_id, "exp": expire, "type": "refresh"}
+    return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
+
+
+def decode_refresh_token(token: str) -> dict | None:
+    try:
+        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        if payload.get("type") != "refresh":
+            return None
+        return payload
     except JWTError:
         return None
 
@@ -28,24 +49,3 @@ def get_user_id_from_query(token: str) -> str | None:
     if payload is None:
         return None
     return payload["sub"]
-
-
-class TokenBucket:
-    def __init__(self, rate: float = 10.0, capacity: int = 20):
-        self.rate = rate
-        self.capacity = capacity
-        self.tokens: dict[str, float] = defaultdict(lambda: float(capacity))
-        self.last_refill: dict[str, float] = defaultdict(time.monotonic)
-
-    def consume(self, key: str, tokens: int = 1) -> bool:
-        now = time.monotonic()
-        elapsed = now - self.last_refill[key]
-        self.tokens[key] = min(self.capacity, self.tokens[key] + elapsed * self.rate)
-        self.last_refill[key] = now
-        if self.tokens[key] >= tokens:
-            self.tokens[key] -= tokens
-            return True
-        return False
-
-
-rate_limiter = TokenBucket(rate=10.0, capacity=20)
