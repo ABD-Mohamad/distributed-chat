@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
-    async def CreateChat(self, request, context):
+    async def CreateChat(self, request, context):  # noqa: N802
         async with get_primary_session(f"new:{uuid.uuid4()}") as db:
             chat_id = str(uuid.uuid4())
             db.add(Chat(id=uuid.UUID(chat_id), name=request.name))
@@ -25,7 +25,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
             await db.commit()
             return chat_pb2.CreateChatResponse(chat_id=chat_id, name=request.name)
 
-    async def ListChats(self, request, context):
+    async def ListChats(self, request, context):  # noqa: N802
         all_chats = []
         for session_factory in get_all_primary_sessions():
             async with session_factory as db:
@@ -38,7 +38,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
                     all_chats.append(chat_pb2.Chat(id=str(c.id), name=c.name, created_at=c.created_at.isoformat()))
         return chat_pb2.ListChatsResponse(chats=all_chats)
 
-    async def JoinChat(self, request, context):
+    async def JoinChat(self, request, context):  # noqa: N802
         async with get_primary_session(request.chat_id) as db:
             result = await db.execute(select(Chat).where(Chat.id == uuid.UUID(request.chat_id)))
             if not result.scalar_one_or_none():
@@ -55,7 +55,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
             await db.commit()
             return chat_pb2.JoinChatResponse(detail="Joined chat")
 
-    async def SendMessage(self, request, context):
+    async def SendMessage(self, request, context):  # noqa: N802
         async with get_primary_session(request.chat_id) as db:
             msg_id = str(uuid.uuid4())
             db.add(Message(
@@ -82,7 +82,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
         asyncio.ensure_future(publish_event("message.sent", payload))
         return chat_pb2.SendMessageResponse(message_id=msg_id)
 
-    async def GetHistory(self, request, context):
+    async def GetHistory(self, request, context):  # noqa: N802
         from .cache import get_cached_history, set_cached_history
         cached = await get_cached_history(request.chat_id)
         if cached is not None:
@@ -122,7 +122,7 @@ class ChatServicer(chat_pb2_grpc.ChatServiceServicer):
                 sent_at=msg["sent_at"],
             )
 
-    async def SubscribeMessages(self, request, context):
+    async def SubscribeMessages(self, request, context):  # noqa: N802
         q: asyncio.Queue[dict] = asyncio.Queue()
         async def _push(msg: dict):
             await q.put(msg)

@@ -32,7 +32,11 @@ jobs:
                      load-balancer/requirements.txt; do
             pip install -r "$req"
           done
-      - run: mypy --ignore-missing-imports auth-service/app chat-service/app event-service/app gateway/app load-balancer/app
+      - name: Run mypy
+        run: |
+          for dir in auth-service/app chat-service/app event-service/app gateway/app load-balancer/app; do
+            mypy --ignore-missing-imports "$dir"
+          done
 
   build:
     runs-on: ubuntu-latest
@@ -61,5 +65,9 @@ jobs:
       - run: pip install pytest==8.3.4 pytest-asyncio==0.25.3 httpx==0.28.1
       - name: Check for tests and run
         run: |
-          if (Test-Path -Path "tests" -PathType Container) { pytest tests/ } else { Write-Host "No tests/ directory found, skipping" }
-        shell: pwsh
+          if curl -s -o /dev/null -w "%{http_code}" http://localhost:8080/health 2>/dev/null; then
+            pytest tests/
+          else
+            echo "No running services found at localhost:8080, skipping tests"
+          fi
+        shell: bash

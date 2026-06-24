@@ -4,8 +4,6 @@ import time
 from pathlib import Path
 
 import websockets
-
-START_TIME = time.time()
 from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
@@ -38,11 +36,19 @@ from .telemetry import setup_telemetry
 
 logger = logging.getLogger(__name__)
 
+START_TIME = time.time()
+
 app = FastAPI(title="NexusChat Gateway")
 
 setup_telemetry(app=app)
 
-app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=settings.cors_origins.split(","),
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 app.add_middleware(GZipMiddleware, minimum_size=1000)
 
 STATIC_DIR = Path(__file__).parent / "static"

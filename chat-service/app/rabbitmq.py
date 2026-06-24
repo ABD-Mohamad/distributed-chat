@@ -33,7 +33,10 @@ async def init_rabbitmq(consumer_callback=None):
 async def start_consumer():
     global _consumer_tag
     if not _channel or not _exchange or not _on_message_callback:
-        logger.warning(f"RMQ consumer skipped: chan={_channel is not None}, exch={_exchange is not None}, cb={_on_message_callback is not None}")
+        logger.warning(
+            f"RMQ consumer skipped: chan={_channel is not None}, "
+            f"exch={_exchange is not None}, cb={_on_message_callback is not None}",
+        )
         return
     try:
         queue = await _channel.declare_queue(

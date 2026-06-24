@@ -2,8 +2,6 @@ import time
 import uuid
 from contextlib import asynccontextmanager
 
-START_TIME = time.time()
-
 from fastapi import Depends, FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
@@ -15,6 +13,8 @@ from .config import settings
 from .database import engine, get_db
 from .models import User
 from .telemetry import setup_telemetry
+
+START_TIME = time.time()
 
 
 @asynccontextmanager

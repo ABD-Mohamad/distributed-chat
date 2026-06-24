@@ -4,8 +4,6 @@ import os
 import time
 from pathlib import Path
 
-START_TIME = time.time()
-
 import httpx
 from app.circuit_breaker import CircuitBreaker, CircuitState
 from app.metrics_exporter import (
@@ -39,6 +37,8 @@ from fastapi import FastAPI, Query, Request, Response, WebSocket
 from fastapi.responses import FileResponse, JSONResponse
 
 logger = logging.getLogger(__name__)
+
+START_TIME = time.time()
 
 app = FastAPI(title="NexusChat Load Balancer", version="1.0.0")
 
@@ -228,7 +228,10 @@ async def get_circuit_breakers():
 @app.get("/switch-strategy/{name}", tags=["Management"])
 async def switch_strategy(name: str):
     if name not in _strategies:
-        return JSONResponse(status_code=400, content={"error": f"Unknown strategy '{name}'.", "available": list(_strategies.keys())})
+        return JSONResponse(
+            status_code=400,
+            content={"error": f"Unknown strategy '{name}'.", "available": list(_strategies.keys())},
+        )
     async with _strategy_lock:
         _active_strategy_name = name
     logger.info(f"Strategy switched -> {name} ({_strategies[name].__class__.__name__})")
@@ -274,7 +277,10 @@ async def proxy(request: Request, path: str):
         if not await cb.can_execute():
             requests_rejected_total.labels(backend=backend).inc()
             logger.warning(f"Request rejected - circuit OPEN for {backend}")
-            return JSONResponse(status_code=503, content={"error": f"Circuit breaker OPEN for {backend}. Retry after {cb.recovery_timeout}s."})
+            return JSONResponse(
+                status_code=503,
+                content={"error": f"Circuit breaker OPEN for {backend}. Retry after {cb.recovery_timeout}s."},
+            )
 
         target_url = f"{backend}/{path}"
         if request.url.query:
@@ -309,7 +315,13 @@ async def proxy(request: Request, path: str):
         if retry_count > 0:
             retries_total.labels(backend=backend).inc(retry_count)
 
-        logger.info(f"[{strategy_name}] {request.method} /{path} -> {backend} HTTP {resp.status_code}  {latency*1000:.1f}ms" + (f"  retries={retry_count}" if retry_count > 0 else ""))
+        log_msg = (
+            f"[{strategy_name}] {request.method} /{path} -> {backend} "
+            f"HTTP {resp.status_code}  {latency*1000:.1f}ms"
+        )
+        if retry_count > 0:
+            log_msg += f"  retries={retry_count}"
+        logger.info(log_msg)
 
         resp_headers = _sanitize_resp_headers(dict(resp.headers))
         if retry_count > 0:

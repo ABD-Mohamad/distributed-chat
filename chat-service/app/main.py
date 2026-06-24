@@ -4,8 +4,7 @@ import logging
 import time
 import uuid
 from contextlib import asynccontextmanager
-
-START_TIME = time.time()
+from datetime import UTC
 
 import aio_pika
 import chat_pb2_grpc
@@ -14,12 +13,6 @@ from fastapi import Depends, FastAPI, Header, HTTPException, Query, WebSocket, W
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from sqlalchemy import select, text
-
-from .config import settings
-from .telemetry import setup_telemetry
-
-logger = logging.getLogger(__name__)
-from datetime import UTC
 
 from .auth import decode_token
 from .cache import (
@@ -30,6 +23,7 @@ from .cache import (
     redis_client,
     set_cached_history,
 )
+from .config import settings
 from .database import auth_async_session
 from .event_producer import close_kafka, init_kafka, kafka_producer, publish_event
 from .grpc_server import ChatServicer
@@ -37,7 +31,12 @@ from .models import Chat, ChatMember, Message
 from .rabbitmq import _connection as _rmq_connection
 from .rabbitmq import close_rabbitmq, init_rabbitmq, start_consumer
 from .sharding import _shards, dispose_shards, get_primary_session, get_replica_session, init_shards
+from .telemetry import setup_telemetry
 from .ws_manager import manager
+
+logger = logging.getLogger(__name__)
+
+START_TIME = time.time()
 
 
 def get_user_id(authorization: str = Header(...)) -> str:
@@ -124,7 +123,10 @@ class SendMessageRequest(BaseModel):
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "chat-service", "version": "1.0.0", "server_id": settings.grpc_port, "uptime": round(time.time() - START_TIME, 2)}
+    return {
+        "status": "ok", "service": "chat-service", "version": "1.0.0",
+        "server_id": settings.grpc_port, "uptime": round(time.time() - START_TIME, 2),
+    }
 
 
 @app.get("/ready")
@@ -180,7 +182,10 @@ async def register(req: AuthRequest):
 async def login(req: AuthRequest):
     from .auth import create_token, verify_password
     async with auth_async_session() as db:
-        result = await db.execute(text("SELECT id, password_hash FROM users WHERE username = :un"), {"un": req.username})
+        result = await db.execute(
+            text("SELECT id, password_hash FROM users WHERE username = :un"),
+            {"un": req.username},
+        )
         row = result.fetchone()
         if not row or not verify_password(req.password, row[1]):
             raise HTTPException(status_code=401, detail="Invalid credentials")
@@ -289,7 +294,10 @@ async def websocket_endpoint(websocket: WebSocket, chat_id: str, token: str = Qu
             async with get_primary_session(chat_id) as db:
                 username = await get_username(user_id)
                 msg_id = str(uuid.uuid4())
-                db.add(Message(id=uuid.UUID(msg_id), chat_id=uuid.UUID(chat_id), sender_id=uuid.UUID(user_id), body=body))
+                db.add(Message(
+                    id=uuid.UUID(msg_id), chat_id=uuid.UUID(chat_id),
+                    sender_id=uuid.UUID(user_id), body=body,
+                ))
                 await db.commit()
                 from datetime import datetime
                 payload_out = {

@@ -5,8 +5,6 @@ import time
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
 
-START_TIME = time.time()
-
 from aiokafka import AIOKafkaConsumer
 from fastapi import FastAPI
 
@@ -14,6 +12,8 @@ from .config import settings
 from .telemetry import setup_telemetry
 
 logger = logging.getLogger(__name__)
+
+START_TIME = time.time()
 
 _events: list[dict] = []
 MAX_EVENTS = 1000
@@ -32,7 +32,10 @@ async def consume():
                 value_deserializer=lambda v: json.loads(v.decode()),
             )
             await consumer.start()
-            logger.info(f"Kafka consumer started, subscribed to {settings.kafka_topic_messages}, {settings.kafka_topic_events}")
+            logger.info(
+                f"Kafka consumer started, subscribed to {settings.kafka_topic_messages}, "
+                f"{settings.kafka_topic_events}",
+            )
             retry_delay = 1
             try:
                 async for msg in consumer:
@@ -69,7 +72,10 @@ setup_telemetry(app=app)
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "event-service", "version": "1.0.0", "uptime": round(time.time() - START_TIME, 2)}
+    return {
+        "status": "ok", "service": "event-service", "version": "1.0.0",
+        "uptime": round(time.time() - START_TIME, 2),
+    }
 
 
 @app.get("/ready")
