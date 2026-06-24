@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexusChat</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+  <div class="chat-layout">
+    <!-- Sidebar -->
+    <div class="chat-sidebar">
+      <div class="sidebar-header">
+        <h2>NexusChat</h2>
+        <button class="btn btn-ghost" onclick="logout()" title="Log out" style="color:white">Logout</button>
+      </div>
+
+      <div class="sidebar-user">
+        <span>Logged in as <span class="username" id="sidebarUsername">---</span></span>
+      </div>
+
+      <div class="create-chat-box">
+        <input id="newChatInput" placeholder="New chat name..." maxlength="100">
+        <button class="btn btn-primary btn-sm" onclick="createChat()" style="width:100%">+ Create Chat</button>
+      </div>
+
+      <div class="chat-list" id="chatList">
+        <div class="chat-list-empty" id="chatListEmpty">No chats yet. Create one above.</div>
+      </div>
+    </div>
+
+    <!-- Main -->
+    <div class="chat-main">
+      <div class="chat-main-header">
+        <div>
+          <button class="btn btn-ghost" onclick="toggleSidebar()" style="display:none" id="menuBtn">Menu</button>
+          <h3 id="chatHeaderName" style="display:inline">NexusChat</h3>
+          <span class="chat-meta" id="chatHeaderMeta"></span>
+          <span class="no-chat">Select a chat or create a new one</span>
+        </div>
+      </div>
+
+      <div class="messages-area" id="messagesArea">
+        <div class="messages-empty" id="messagesEmpty">Select a chat to start messaging</div>
+      </div>
+
+      <div class="chat-input-area">
+        <input id="msgInput" placeholder="Type a message..." disabled autocomplete="off">
+        <button id="sendBtn" disabled onclick="sendMessage()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script src="/static/js/api.js"></script>
+  <script src="/static/js/chat.js"></script>
+  <script>
+    // Redirect if not authenticated
+    (function init() {
+      const token = getToken();
+      if (!token) {
+        window.location.href = "/";
+        return;
+      }
+      const user = getUser();
+      if (user && user.id) {
+        document.getElementById("sidebarUsername").textContent = user.id.slice(0, 8) + "...";
+      }
+      loadChats();
+    })();
+
+    // Enter to send
+    document.getElementById("msgInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        sendMessage();
+      }
+    });
+    document.getElementById("newChatInput").addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        createChat();
+      }
+    });
+
+    // Responsive menu button
+    if (window.innerWidth <= 768) {
+      document.getElementById("menuBtn").style.display = "inline-flex";
+    }
+  </script>
+</body>
+</html>

@@ -15,8 +15,9 @@ async def test_all_health_endpoints():
         lb_resp = await client.get(f"{LB_URL}/health")
         results["load_balancer"] = lb_resp
     assert results["gateway"].status_code == 200
-    assert results["gateway"].json() == {"status": "ok"}
+    gw_data = results["gateway"].json()
+    assert gw_data["status"] == "ok"
     assert results["load_balancer"].status_code == 200
     lb_data = results["load_balancer"].json()
-    assert "status" in lb_data
+    assert lb_data["status"] in ("ok", "healthy")
     assert "active_strategy" in lb_data

@@ -19,4 +19,6 @@ if [ -z "$(ls -A "$PGDATA" 2>/dev/null)" ]; then
     echo "Replica setup complete."
 fi
 
+echo "primary_conninfo = 'host=$PRIMARY_HOST user=$REPLICATION_USER password=$REPLICATION_PASSWORD'" >> /etc/postgresql/postgresql.conf
+
 exec su-exec postgres postgres -c config_file=/etc/postgresql/postgresql.conf

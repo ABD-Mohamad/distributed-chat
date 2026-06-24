@@ -44,7 +44,7 @@ async def test_list_chats(async_client, token):
 @pytest.mark.timeout(30)
 async def test_join_chat(async_client, token, chat_id):
     username2 = f"user2_{uuid.uuid4().hex[:8]}"
-    register_resp = await async_client.post("/register", json={"username": username2, "password": "pass2"})
+    register_resp = await async_client.post("/register", json={"username": username2, "password": "pass22"})
     assert register_resp.status_code == 200
     token2 = register_resp.json()["access_token"]
     resp = await async_client.post(

@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NexusChat — Load Balancer</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --primary: #4f46e5; --success: #22c55e; --danger: #ef4444; --warning: #f59e0b;
+      --gray-50: #f9fafb; --gray-100: #f3f4f6; --gray-200: #e5e7eb; --gray-300: #d1d5db;
+      --gray-400: #9ca3af; --gray-500: #6b7280; --gray-600: #4b5563; --gray-700: #374151;
+      --gray-800: #1f2937; --gray-900: #111827;
+      --radius: 12px; --radius-sm: 8px;
+      --shadow: 0 1px 3px rgba(0,0,0,0.1), 0 1px 2px rgba(0,0,0,0.06);
+    }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--gray-100); color: var(--gray-900); line-height: 1.5; padding: 32px; max-width: 1200px; margin: 0 auto; }
+    h1 { font-size: 24px; margin-bottom: 24px; display: flex; align-items: center; gap: 12px; }
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; margin-bottom: 32px; }
+    .card { background: white; border-radius: var(--radius); padding: 24px; box-shadow: var(--shadow); }
+    .card .label { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-500); margin-bottom: 8px; }
+    .card .value { font-size: 28px; font-weight: 700; }
+    .card .value.green { color: var(--success); } .card .value.yellow { color: var(--warning); } .card .value.red { color: var(--danger); }
+    table { width: 100%; background: white; border-radius: var(--radius); overflow: hidden; box-shadow: var(--shadow); border-collapse: collapse; }
+    th { background: var(--gray-50); padding: 12px 16px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--gray-500); border-bottom: 1px solid var(--gray-200); }
+    td { padding: 12px 16px; font-size: 13px; border-bottom: 1px solid var(--gray-100); }
+    .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 6px; }
+    .dot.closed { background: var(--success); } .dot.open { background: var(--danger); } .dot.half { background: var(--warning); }
+    .badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 500; }
+    .badge.green { background: #dcfce7; color: #166534; } .badge.yellow { background: #fef9c3; color: #854d0e; } .badge.red { background: #fee2e2; color: #991b1b; }
+    .selector { margin-bottom: 24px; display: flex; align-items: center; gap: 12px; }
+    .selector select { padding: 8px 12px; border: 1px solid var(--gray-300); border-radius: var(--radius-sm); font-size: 14px; background: white; outline: none; }
+    a { color: var(--gray-400); text-decoration: none; font-size: 12px; }
+    a:hover { text-decoration: underline; }
+    @media (max-width: 768px) { body { padding: 16px; } .grid { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+  <h1>Load Balancer <span style="font-size:12px;color:var(--gray-400);font-weight:400">Auto-refresh 5s</span></h1>
+
+  <div class="selector">
+    <span style="font-size:13px;color:var(--gray-600)">Strategy:</span>
+    <strong id="activeStrategy" style="color:var(--primary)">---</strong>
+    <select id="strategySelect" onchange="switchStrategy()"></select>
+  </div>
+
+  <div class="grid">
+    <div class="card"><div class="label">Backends</div><div class="value" id="statBackends">0</div></div>
+    <div class="card"><div class="label">Circuit Breakers</div><div class="value green" id="statCircuitBreakers">All Closed</div></div>
+    <div class="card"><div class="label">Avg Latency</div><div class="value green" id="statLatency">0 ms</div></div>
+    <div class="card"><div class="label">Total Requests</div><div class="value" id="statRequests">0</div></div>
+  </div>
+
+  <table>
+    <thead><tr><th>Backend</th><th>Active</th><th>Latency</th><th>Error Rate</th><th>Requests</th><th>Circuit Breaker</th></tr></thead>
+    <tbody id="backendsBody"><tr><td colspan="6" style="text-align:center;padding:24px;color:var(--gray-400)">Loading...</td></tr></tbody>
+  </table>
+
+  <p style="text-align:center;margin-top:24px"><a href="http://localhost:8080">Chat</a> &middot; <a href="http://localhost:8080/admin">Admin</a></p>
+
+  <script>
+    let interval = null;
+
+    async function load() {
+      try {
+        const [health, strategies, metrics, cb] = await Promise.all([
+          fetch("http://localhost:8000/health").then(r => r.json()),
+          fetch("http://localhost:8000/strategies").then(r => r.json()),
+          fetch("http://localhost:8000/metrics").then(r => r.json()),
+          fetch("http://localhost:8000/circuit-breakers").then(r => r.json()),
+        ]);
+        renderStats(health, metrics, cb);
+        renderBackends(metrics, cb);
+        renderStrategies(strategies);
+      } catch (e) { console.error(e); }
+    }
+
+    function renderStats(health, metrics, cb) {
+      const backends = Object.keys(metrics);
+      const open = Object.values(cb).filter(v => v === "open").length;
+      const avgLat = Object.values(metrics).reduce((s, m) => s + m.avg_latency, 0) / (backends.length || 1);
+      const total = Object.values(metrics).reduce((s, m) => s + m.request_count, 0);
+      document.getElementById("statBackends").textContent = backends.length;
+      const el = document.getElementById("statCircuitBreakers");
+      el.textContent = open === 0 ? "All Closed" : open + " Open";
+      el.className = "value " + (open === 0 ? "green" : open < 2 ? "yellow" : "red");
+      document.getElementById("statLatency").textContent = (avgLat * 1000).toFixed(1) + " ms";
+      document.getElementById("statLatency").className = "value " + (avgLat < 0.1 ? "green" : avgLat < 0.5 ? "yellow" : "red");
+      document.getElementById("statRequests").textContent = total;
+    }
+
+    function renderBackends(metrics, cb) {
+      const body = document.getElementById("backendsBody");
+      const keys = Object.keys(metrics);
+      if (!keys.length) { body.innerHTML = "<tr><td colspan='6' style='text-align:center;padding:24px;color:var(--gray-400)'>No backends</td></tr>"; return; }
+      body.innerHTML = keys.map(b => {
+        const m = metrics[b];
+        const br = cb[b] || "closed";
+        const cls = br === "open" ? "red" : br === "half" ? "yellow" : "green";
+        return `<tr><td><span class="dot ${br}"></span>${b}</td><td>${m.active_connections}</td><td>${(m.avg_latency*1000).toFixed(1)} ms</td><td>${(m.error_rate*100).toFixed(1)}%</td><td>${m.request_count}</td><td><span class="badge ${cls}">${br.charAt(0).toUpperCase()+br.slice(1)}</span></td></tr>`;
+      }).join("");
+    }
+
+    function renderStrategies(s) {
+      const sel = document.getElementById("strategySelect");
+      sel.innerHTML = Object.entries(s.available).map(([k, d]) => `<option value="${k}" ${k===s.active?"selected":""}>${d}</option>`).join("");
+    }
+
+    async function switchStrategy() {
+      const name = document.getElementById("strategySelect").value;
+      const r = await fetch("http://localhost:8000/switch-strategy/"+name);
+      if (r.ok) {
+        const d = await r.json();
+        document.getElementById("activeStrategy").textContent = d.active_strategy;
+      }
+    }
+
+    document.addEventListener("DOMContentLoaded", () => { load(); interval = setInterval(load, 5000); });
+  </script>
+</body>
+</html>

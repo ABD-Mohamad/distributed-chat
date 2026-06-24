@@ -12,7 +12,7 @@ GATEWAY_WS_URL = "ws://localhost:8080"
 async def test_ws_connect(async_client, token, chat_id):
     ws_url = f"{GATEWAY_WS_URL}/ws/{chat_id}?token={token}"
     async with websockets.connect(ws_url) as ws:
-        assert ws.open
+        assert ws.close_code is None
 
 
 @pytest.mark.asyncio

@@ -237,7 +237,7 @@ async def switch_strategy(name: str):
 
 @app.get("/dashboard", tags=["Management"], include_in_schema=False)
 async def dashboard():
-    for candidate in [Path(__file__).parent.parent / "dashboard.html", Path("/app/dashboard.html")]:
+    for candidate in [Path(__file__).parent / "static" / "dashboard.html", Path("/app/static/dashboard.html")]:
         if candidate.exists():
             return FileResponse(str(candidate), media_type="text/html")
     return JSONResponse(status_code=404, content={"error": "dashboard.html not found"})

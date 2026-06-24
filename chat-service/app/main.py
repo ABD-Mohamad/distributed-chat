@@ -189,8 +189,8 @@ async def login(req: AuthRequest):
 
 @app.post("/chats")
 async def create_chat(req: CreateChatRequest, user_id: str = Depends(get_user_id)):
-    async with get_primary_session(f"new:{uuid.uuid4()}") as db:
-        chat_id = str(uuid.uuid4())
+    chat_id = str(uuid.uuid4())
+    async with get_primary_session(chat_id) as db:
         db.add(Chat(id=uuid.UUID(chat_id), name=req.name))
         db.add(ChatMember(chat_id=uuid.UUID(chat_id), user_id=uuid.UUID(user_id)))
         await db.commit()

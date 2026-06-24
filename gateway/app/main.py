@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import time
+from pathlib import Path
 
 import websockets
 
@@ -8,7 +9,8 @@ START_TIME = time.time()
 from fastapi import FastAPI, Header, HTTPException, Query, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
-from fastapi.responses import HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from .auth import create_refresh_token, create_token, decode_refresh_token, decode_token
@@ -42,6 +44,9 @@ setup_telemetry(app=app)
 
 app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins.split(","), allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
 app.add_middleware(GZipMiddleware, minimum_size=1000)
+
+STATIC_DIR = Path(__file__).parent / "static"
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 
 class RegisterRequest(BaseModel):
@@ -231,76 +236,19 @@ async def websocket_proxy(websocket: WebSocket, chat_id: str, token: str = Query
 
 @app.get("/", response_class=HTMLResponse)
 async def index():
-    return HTMLResponse(content=HTML_PAGE)
+    return FileResponse(str(STATIC_DIR / "index.html"))
 
 
-HTML_PAGE = """<!DOCTYPE html>
-<html>
-<head><title>NexusChat</title>
-<style>
-body { font-family: sans-serif; max-width: 800px; margin: auto; padding: 20px; }
-#messages { height: 300px; overflow-y: scroll; border: 1px solid #ccc; padding: 10px; }
-input, button { margin: 4px; }
-</style></head>
-<body>
-<h1>NexusChat</h1>
-<div id="auth">
-  <input id="username" placeholder="Username"/>
-  <input id="password" type="password" placeholder="Password"/>
-  <button onclick="register()">Register</button>
-  <button onclick="login()">Login</button>
-</div>
-<div id="chat" style="display:none">
-  <div>
-    <input id="chatName" placeholder="Chat name"/>
-    <button onclick="createChat()">Create Chat</button>
-  </div>
-  <select id="chatList" size="5" style="width:100%" onchange="selectChat()"></select>
-  <div id="messages"></div>
-  <input id="msgInput" placeholder="Type a message"/>
-  <button onclick="sendMsg()">Send</button>
-</div>
-<script>
-let token = null; let currentChat = null; let ws = null;
-async function api(method, path, body) {
-  const opts = { method, headers: { 'Content-Type': 'application/json' } };
-  if (token) opts.headers['Authorization'] = 'Bearer ' + token;
-  if (body) opts.body = JSON.stringify(body);
-  const r = await fetch(path, opts);
-  return r.json();
-}
-async function register() { const r = await api('POST','/register',{username:u.value,password:p.value}); token = r.access_token; showChat(); }
-async function login() { const r = await api('POST','/login',{username:u.value,password:p.value}); token = r.access_token; showChat(); }
-async function showChat() {
-  document.getElementById('auth').style.display='none';
-  document.getElementById('chat').style.display='block';
-  await loadChats();
-}
-async function loadChats() {
-  const chats = await api('GET','/chats');
-  const sel = document.getElementById('chatList'); sel.innerHTML = '';
-  for (const c of chats) { const o = document.createElement('option'); o.value=c.id; o.text=c.name; sel.appendChild(o); }
-}
-async function createChat() {
-  await api('POST','/chats',{name: document.getElementById('chatName').value});
-  await loadChats();
-}
-async function selectChat() {
-  currentChat = document.getElementById('chatList').value;
-  const msgs = await api('GET','/chats/'+currentChat+'/messages');
-  const div = document.getElementById('messages'); div.innerHTML = '';
-  for (const m of msgs) div.innerHTML += '<b>'+m.sender_username+'</b>: '+m.body+'<br/>';
-  if (ws) ws.close();
-  ws = new WebSocket('ws://'+location.host+'/ws/'+currentChat+'?token='+token);
-  ws.onmessage = (e) => {
-    const m = JSON.parse(e.data);
-    div.innerHTML += '<b>'+m.sender_username+'</b>: '+m.body+'<br/>';
-  };
-}
-async function sendMsg() {
-  const inp = document.getElementById('msgInput');
-  ws.send(JSON.stringify({body: inp.value}));
-  inp.value = '';
-}
-</script>
-</body></html>"""
+@app.get("/chat", response_class=HTMLResponse)
+async def chat_page():
+    return FileResponse(str(STATIC_DIR / "chat.html"))
+
+
+@app.get("/admin", response_class=HTMLResponse)
+async def admin_page():
+    return FileResponse(str(STATIC_DIR / "admin.html"))
+
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_page():
+    return FileResponse(str(STATIC_DIR / "dashboard.html"))
