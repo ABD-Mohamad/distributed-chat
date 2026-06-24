@@ -1,0 +1,69 @@
+syntax = "proto3";
+package nexuschat;
+
+service ChatService {
+  rpc CreateChat (CreateChatRequest) returns (ChatResponse);
+  rpc ListChats (ListChatsRequest) returns (ListChatsResponse);
+  rpc JoinChat (JoinChatRequest) returns (JoinChatResponse);
+  rpc SendMessage (SendMessageRequest) returns (SendMessageResponse);
+  rpc GetHistory (HistoryRequest) returns (HistoryResponse);
+  rpc SubscribeMessages (SubscribeRequest) returns (stream MessageEvent);
+}
+
+message CreateChatRequest {
+  string name = 1;
+  string user_id = 2;
+}
+message ChatResponse {
+  string id = 1;
+  string name = 2;
+  string created_at = 3;
+}
+
+message ListChatsRequest {
+  string user_id = 1;
+}
+message ListChatsResponse {
+  repeated ChatResponse chats = 1;
+}
+
+message JoinChatRequest {
+  string chat_id = 1;
+  string user_id = 2;
+}
+message JoinChatResponse {
+  string detail = 1;
+}
+
+message SendMessageRequest {
+  string chat_id = 1;
+  string sender_id = 2;
+  string body = 3;
+  string idempotency_key = 4;
+}
+message SendMessageResponse {
+  string message_id = 1;
+  string status = 2;
+}
+
+message HistoryRequest {
+  string chat_id = 1;
+  string user_id = 2;
+  int32 limit = 3;
+}
+message HistoryResponse {
+  repeated MessageEvent messages = 1;
+}
+
+message SubscribeRequest {
+  string chat_id = 1;
+  string user_id = 2;
+}
+message MessageEvent {
+  string id = 1;
+  string chat_id = 2;
+  string sender_id = 3;
+  string sender_username = 4;
+  string body = 5;
+  string sent_at = 6;
+}

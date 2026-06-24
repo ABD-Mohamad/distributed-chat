@@ -1,0 +1,270 @@
+services:
+  jaeger:
+    image: jaegertracing/all-in-one:1
+    ports:
+      - "16686:16686"
+      - "4318:4318"
+    environment:
+      COLLECTOR_OTLP_ENABLED: "true"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: gateway/Dockerfile
+    ports:
+      - "${GATEWAY_PORT:-8080}:8000"
+    env_file: .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: gateway
+    depends_on:
+      load-balancer:
+        condition: service_started
+
+  load-balancer:
+    build:
+      context: .
+      dockerfile: load-balancer/Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: load-balancer
+    depends_on:
+      chat-service-1:
+        condition: service_started
+      chat-service-2:
+        condition: service_started
+      chat-service-3:
+        condition: service_started
+      jaeger:
+        condition: service_started
+
+  auth-service:
+    build:
+      context: .
+      dockerfile: auth-service/Dockerfile
+    env_file: .env
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: auth-service
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+
+  chat-service-1:
+    build:
+      context: .
+      dockerfile: chat-service/Dockerfile
+    env_file: .env
+    environment:
+      GRPC_PORT: "50051"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: chat-service-1
+    depends_on:
+      kafka:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+      shard0-primary:
+        condition: service_healthy
+      shard1-primary:
+        condition: service_healthy
+      postgres-auth:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+
+  chat-service-2:
+    build:
+      context: .
+      dockerfile: chat-service/Dockerfile
+    env_file: .env
+    environment:
+      GRPC_PORT: "50052"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: chat-service-2
+    depends_on:
+      kafka:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+      shard0-primary:
+        condition: service_healthy
+      shard1-primary:
+        condition: service_healthy
+      postgres-auth:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+
+  chat-service-3:
+    build:
+      context: .
+      dockerfile: chat-service/Dockerfile
+    env_file: .env
+    environment:
+      GRPC_PORT: "50053"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: chat-service-3
+    depends_on:
+      kafka:
+        condition: service_started
+      rabbitmq:
+        condition: service_started
+      redis:
+        condition: service_started
+      shard0-primary:
+        condition: service_healthy
+      shard1-primary:
+        condition: service_healthy
+      postgres-auth:
+        condition: service_healthy
+      jaeger:
+        condition: service_started
+
+  kafka:
+    image: apache/kafka:3.9.0
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_NODE_ID: "1"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENERS: PLAINTEXT://kafka:9092,CONTROLLER://kafka:9093
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:9092
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: PLAINTEXT:PLAINTEXT,CONTROLLER:PLAINTEXT
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "true"
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: "1"
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: "1"
+      CLUSTER_ID: "nexuschat-kafka-cluster-01"
+
+  rabbitmq:
+    image: rabbitmq:4-alpine
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+
+  event-service:
+    build:
+      context: .
+      dockerfile: event-service/Dockerfile
+    environment:
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://jaeger:4318
+      OTEL_SERVICE_NAME: event-service
+    depends_on:
+      kafka:
+        condition: service_started
+      jaeger:
+        condition: service_started
+
+  postgres-auth:
+    image: postgres:16-alpine
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexuschat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexuschat}
+      POSTGRES_DB: ${POSTGRES_DB:-nexuschat}
+    volumes:
+      - postgres_auth_data:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexuschat} -d ${POSTGRES_DB:-nexuschat}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  shard0-primary:
+    image: postgres:16-alpine
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexuschat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexuschat}
+      POSTGRES_DB: ${POSTGRES_DB:-nexuschat}
+    volumes:
+      - shard0_primary_data:/var/lib/postgresql/data
+      - ./infra/postgres/shard-init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infra/postgres/shard0-primary/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./infra/postgres/shard0-primary/pg_hba.conf:/etc/postgresql/pg_hba.conf
+      - ./infra/postgres/setup-primary.sh:/docker-entrypoint-initdb.d/setup-replication.sh
+    command: -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexuschat} -d ${POSTGRES_DB:-nexuschat}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  shard0-replica:
+    image: postgres:16-alpine
+    ports:
+      - "5434:5432"
+    environment:
+      PRIMARY_HOST: shard0-primary
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: replicator
+    volumes:
+      - shard0_replica_data:/var/lib/postgresql/data
+      - ./infra/postgres/shard0-primary/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./infra/postgres/setup-replica.sh:/setup.sh
+    entrypoint: /setup.sh
+    depends_on:
+      shard0-primary:
+        condition: service_healthy
+
+  shard1-primary:
+    image: postgres:16-alpine
+    ports:
+      - "5435:5432"
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-nexuschat}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nexuschat}
+      POSTGRES_DB: ${POSTGRES_DB:-nexuschat}
+    volumes:
+      - shard1_primary_data:/var/lib/postgresql/data
+      - ./infra/postgres/shard-init.sql:/docker-entrypoint-initdb.d/init.sql
+      - ./infra/postgres/shard1-primary/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./infra/postgres/shard1-primary/pg_hba.conf:/etc/postgresql/pg_hba.conf
+      - ./infra/postgres/setup-primary.sh:/docker-entrypoint-initdb.d/setup-replication.sh
+    command: -c config_file=/etc/postgresql/postgresql.conf -c hba_file=/etc/postgresql/pg_hba.conf
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-nexuschat} -d ${POSTGRES_DB:-nexuschat}"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+
+  shard1-replica:
+    image: postgres:16-alpine
+    ports:
+      - "5436:5432"
+    environment:
+      PRIMARY_HOST: shard1-primary
+      REPLICATION_USER: replicator
+      REPLICATION_PASSWORD: replicator
+    volumes:
+      - shard1_replica_data:/var/lib/postgresql/data
+      - ./infra/postgres/shard1-primary/postgresql.conf:/etc/postgresql/postgresql.conf
+      - ./infra/postgres/setup-replica.sh:/setup.sh
+    entrypoint: /setup.sh
+    depends_on:
+      shard1-primary:
+        condition: service_healthy
+
+volumes:
+  postgres_auth_data:
+  shard0_primary_data:
+  shard0_replica_data:
+  shard1_primary_data:
+  shard1_replica_data:
